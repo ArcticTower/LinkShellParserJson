@@ -576,8 +576,6 @@ func parseLinkInfo(reader *bytes.Reader) (*LinkInfo, error) {
 	}
 
 	return linkInfo, nil
-
-	return linkInfo, nil
 }
 
 func parseStringData(reader *bytes.Reader, isUnicode bool) (*StringDataItem, error) {
