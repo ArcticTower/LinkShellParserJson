@@ -147,12 +147,16 @@ type LinkTargetIDList struct {
 }
 
 type LinkInfo struct {
-	Size                            uint32
+	LinkInfoSize                    uint32
 	LinkInfoFlagsRaw                uint32
 	VolumeIDOffset                  uint32
 	LocalBasePathOffset             uint32
 	CommonNetworkRelativeLinkOffset uint32
 	CommonPathSuffixOffset          uint32
+	VolumeID                        []byte
+	LocalBasePath                   string
+	CommonNetworkRelativeLink       []byte
+	CommonPathSuffix                string
 }
 
 type StringData struct {
@@ -311,8 +315,9 @@ func parseShellLink(data []byte) (*ShellLink, error) {
 	if header.LinkFlags.HasLinkInfo {
 		linkInfo, err := parseLinkInfo(reader)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse link info: %v", err)
 		}
+
 		shellLink.LinkInfo = linkInfo
 	}
 
@@ -482,49 +487,95 @@ func parseLinkTargetIDList(reader *bytes.Reader) (*LinkTargetIDList, error) {
 	}, nil
 }
 
+func readNullTerminatedString(reader io.Reader) (string, error) {
+	var buf bytes.Buffer
+	for {
+		var b byte
+		if err := binary.Read(reader, binary.LittleEndian, &b); err != nil {
+			return "", err
+		}
+		if b == 0 {
+			break
+		}
+		buf.WriteByte(b)
+	}
+	return buf.String(), nil
+}
+
 func parseLinkInfo(reader *bytes.Reader) (*LinkInfo, error) {
-	linkInfo := &LinkInfo{}
-
-	err := binary.Read(reader, binary.LittleEndian, &linkInfo.Size)
-	if err != nil {
+	var linkInfoSize uint32
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfoSize); err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(reader, binary.LittleEndian, &linkInfo.LinkInfoFlagsRaw)
-	if err != nil {
+	var linkInfoFlagsRaw uint32
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfoFlagsRaw); err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(reader, binary.LittleEndian, &linkInfo.VolumeIDOffset)
-	if err != nil {
+	linkInfo := &LinkInfo{
+		LinkInfoSize:     linkInfoSize,
+		LinkInfoFlagsRaw: linkInfoFlagsRaw,
+	}
+
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfo.VolumeIDOffset); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfo.LocalBasePathOffset); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfo.CommonNetworkRelativeLinkOffset); err != nil {
+		return nil, err
+	}
+	if err := binary.Read(reader, binary.LittleEndian, &linkInfo.CommonPathSuffixOffset); err != nil {
 		return nil, err
 	}
 
-	err = binary.Read(reader, binary.LittleEndian, &linkInfo.LocalBasePathOffset)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(reader, binary.LittleEndian, &linkInfo.CommonNetworkRelativeLinkOffset)
-	if err != nil {
-		return nil, err
-	}
-
-	err = binary.Read(reader, binary.LittleEndian, &linkInfo.CommonPathSuffixOffset)
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse other fields based on the LinkInfoFlagsRaw
 	if linkInfo.LinkInfoFlagsRaw&VolumeIDAndLocalBasePath != 0 {
-		//TODO
-		// Parse VolumeID and LocalBasePath fields
+		var volumeIDSize uint32
+		if _, err := reader.Seek(int64(linkInfo.VolumeIDOffset), io.SeekStart); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(reader, binary.LittleEndian, &volumeIDSize); err != nil {
+			return nil, err
+		}
+		volumeIDData := make([]byte, volumeIDSize)
+		if _, err := reader.Read(volumeIDData); err != nil {
+			return nil, err
+		}
+		linkInfo.VolumeID = volumeIDData
+
+		if _, err := reader.Seek(int64(linkInfo.LocalBasePathOffset), io.SeekStart); err != nil {
+			return nil, err
+		}
+		localBasePath, err := readNullTerminatedString(reader)
+		if err != nil {
+			return nil, err
+		}
+		linkInfo.LocalBasePath = localBasePath
 	}
 
 	if linkInfo.LinkInfoFlagsRaw&CommonNetworkRelativeLinkAndPathSuffix != 0 {
-		//TODO
-		// Parse CommonNetworkRelativeLink and PathSuffix fields
+		if _, err := reader.Seek(int64(linkInfo.CommonNetworkRelativeLinkOffset), io.SeekStart); err != nil {
+			return nil, err
+		}
+		commonNetworkRelativeLinkSize := make([]byte, 4)
+		if _, err := reader.Read(commonNetworkRelativeLinkSize); err != nil {
+			return nil, err
+		}
+		linkInfo.CommonNetworkRelativeLink = commonNetworkRelativeLinkSize
+
+		if _, err := reader.Seek(int64(linkInfo.CommonPathSuffixOffset), io.SeekStart); err != nil {
+			return nil, err
+		}
+		commonPathSuffix, err := readNullTerminatedString(reader)
+		if err != nil {
+			return nil, err
+		}
+		linkInfo.CommonPathSuffix = commonPathSuffix
 	}
+
+	return linkInfo, nil
 
 	return linkInfo, nil
 }
