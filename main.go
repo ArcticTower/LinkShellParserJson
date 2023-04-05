@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
+	"os"
+	"path/filepath"
 	"unicode/utf16"
 )
 
@@ -620,27 +621,35 @@ func utf16BytesToUTF8(u16s []uint16) string {
 }
 
 func main() {
-	//test file
-	lnkPath := "Android Studio.lnk"
-
-	// Read the contents of the file into a byte slice
-	fileContent, err := ioutil.ReadFile(lnkPath)
-	if err != nil {
-		log.Fatalf("Failed to read file: %v", err)
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go-lnk-parser <lnk_file_path>")
+		os.Exit(1)
 	}
 
-	// Parse the Shell Link file
-	shellLink, err := parseShellLink(fileContent)
+	lnkPath := os.Args[1]
+	lnkData, err := ioutil.ReadFile(lnkPath)
 	if err != nil {
-		log.Fatalf("Failed to parse Shell Link file: %v", err)
+		fmt.Println("Error reading LNK file:", err)
+		os.Exit(1)
 	}
 
-	// Convert the Shell Link object to JSON
+	shellLink, err := parseShellLink(lnkData)
+	if err != nil {
+		fmt.Println("Error parsing LNK file:", err)
+		os.Exit(1)
+	}
+
 	shellLinkJSON, err := json.MarshalIndent(shellLink, "", "  ")
 	if err != nil {
-		log.Fatalf("Failed to convert Shell Link object to JSON: %v", err)
+		fmt.Println("Error generating JSON:", err)
+		os.Exit(1)
 	}
 
-	// Print the JSON representation of the Shell Link object
-	fmt.Println(string(shellLinkJSON))
+	outputFile := filepath.Join(filepath.Dir(lnkPath), fmt.Sprintf("%s.json", filepath.Base(lnkPath)))
+	if err := ioutil.WriteFile(outputFile, shellLinkJSON, 0644); err != nil {
+		fmt.Println("Error writing JSON file:", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("JSON file saved as: %s\n", outputFile)
 }
